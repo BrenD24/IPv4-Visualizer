@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>IPv4 Subnet Visualizer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .bit-span {
+      display: inline-block;
+      width: 1.3rem;
+      text-align: center;
+      font-family: monospace;
+      font-size: 1.2rem;
+      margin: 0.05rem;
+      cursor: pointer;
+    }
+    .bit-span.network {
+      color: #22c55e;
+    }
+    .bit-span.host {
+      color: #f87171;
+    }
+    .bit-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .bit-label {
+      width: 260px;
+      font-weight: 600;
+    }
+    .invalid {
+      border-color: #f87171 !important;
+    }
+    .octet-space {
+      display: inline-block;
+      width: 1.5rem;
+    }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center py-10 px-4">
+  <h1 class="text-3xl font-bold mb-8">IPv4 Subnet Visualizer</h1>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-6xl">
+    <div class="bg-gray-800 p-6 rounded-xl shadow-lg">
+      <h2 class="text-xl font-semibold mb-4">Inputs</h2>
+      <label class="block mb-2 font-semibold">IP Address:</label>
+      <input id="ip" type="text" value="192.168.1.1" oninput="updateFromIP()" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:outline-none mb-4">
+
+      <label class="block mb-2 font-semibold">CIDR Notation:</label>
+      <input id="cidr" type="number" min="1" max="32" value="24" oninput="updateFromCIDR()" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:outline-none mb-4">
+
+      <label class="block mb-2 font-semibold">Subnet Mask:</label>
+      <input id="mask" type="text" value="255.255.255.0" oninput="updateFromMask()" class="w-full p-2 rounded bg-gray-700 border border-gray-600 focus:outline-none">
+    </div>
+
+    <div class="bg-gray-800 p-6 rounded-xl shadow-lg">
+      <h2 class="text-xl font-semibold mb-4">Subnet Info</h2>
+      <div id="info" class="text-sm space-y-2"></div>
+    </div>
+  </div>
+
+  <div class="w-full max-w-6xl bg-gray-800 p-6 mt-6 rounded-xl shadow-lg">
+    <h2 class="text-xl font-semibold mb-4">Bit-Level View</h2>
+    <div class="overflow-auto">
+      <div class="bit-row">
+        <div class="bit-label">IP Address:</div>
+        <div id="ipBits" class="flex flex-wrap"></div>
+      </div>
+      <div class="bit-row">
+        <div class="bit-label">Subnet Mask:</div>
+        <div id="maskBits" class="flex flex-wrap"></div>
+      </div>
+      <div class="bit-row">
+        <div class="bit-label" title="Bitwise IP AND Subnet Mask">Network Address:</div>
+        <div id="netBits" class="flex flex-wrap"></div>
+      </div>
+      <div class="bit-row">
+        <div class="bit-label" title="Bitwise Network OR Inverted Mask">Broadcast Address:</div>
+        <div id="broadBits" class="flex flex-wrap"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let colorEnabled = true;
+
+    function toBinary(ip) {
+      return ip
+        .split('.')
+        .map(octet => Number(octet).toString(2).padStart(8, '0'))
+        .join('');
+    }
+
+    function toBitsArray(binary) {
+      return binary.split('');
+    }
+
+    function fromBinary(binArray) {
+      return binArray.map(bin => parseInt(bin, 2)).join('.');
+    }
+
+    function cidrToMask(cidr) {
+      return Array(32).fill().map((_, i) => i < cidr ? '1' : '0')
+        .join('').match(/.{1,8}/g).map(bin => parseInt(bin, 2)).join('.');
+    }
+
+    function maskToCIDR(mask) {
+      try {
+        return mask.split('.')
+          .map(num => parseInt(num).toString(2).padStart(8, '0'))
+          .join('').indexOf('0');
+      } catch { return null; }
+    }
+
+    function bitwiseAnd(ip, mask) {
+      const ipBits = ip.split('.').map(o => parseInt(o));
+      const maskBits = mask.split('.').map(o => parseInt(o));
+      return ipBits.map((b, i) => b & maskBits[i]).join('.');
+    }
+
+    function invertMask(mask) {
+      return mask.split('.').map(o => 255 - parseInt(o)).join('.');
+    }
+
+    function bitwiseOr(ip, mask) {
+      const ipBits = ip.split('.').map(o => parseInt(o));
+      const maskBits = mask.split('.').map(o => parseInt(o));
+      return ipBits.map((b, i) => b | maskBits[i]).join('.');
+    }
+
+    function displayBits(containerId, binary, cidr) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = '';
+      const bits = toBitsArray(binary);
+      let bitIndex = 0;
+      bits.forEach((bit, i) => {
+        if (bitIndex > 0 && bitIndex % 8 === 0) {
+          const spacer = document.createElement('span');
+          spacer.className = 'octet-space';
+          container.appendChild(spacer);
+        }
+        const span = document.createElement('span');
+        span.className = 'bit-span';
+        if (colorEnabled) {
+          span.classList.add(bitIndex < cidr ? 'network' : 'host');
+        }
+        span.innerText = bit;
+        span.onclick = () => toggleColor();
+        container.appendChild(span);
+        bitIndex++;
+      });
+    }
+
+    function toggleColor() {
+      colorEnabled = !colorEnabled;
+      updateInfo();
+    }
+
+    function validateIP(ip) {
+      return /^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$/.test(ip);
+    }
+
+    function setInvalid(fieldId) {
+      document.getElementById(fieldId).classList.add('invalid');
+    }
+
+    function clearInvalid() {
+      ['ip', 'mask'].forEach(id => document.getElementById(id).classList.remove('invalid'));
+    }
+
+    function updateFromIP() {
+      const ip = document.getElementById('ip').value;
+      if (!validateIP(ip)) return setInvalid('ip');
+      clearInvalid();
+      updateInfo();
+    }
+
+    function updateFromMask() {
+      const mask = document.getElementById('mask').value;
+      if (!validateIP(mask)) return setInvalid('mask');
+      clearInvalid();
+      document.getElementById('cidr').value = maskToCIDR(mask);
+      updateInfo();
+    }
+
+    function updateFromCIDR() {
+      const cidr = parseInt(document.getElementById('cidr').value);
+      const mask = cidrToMask(cidr);
+      document.getElementById('mask').value = mask;
+      updateFromMask();
+    }
+
+    function updateInfo() {
+      const ip = document.getElementById('ip').value;
+      const mask = document.getElementById('mask').value;
+      const cidr = parseInt(document.getElementById('cidr').value);
+
+      if (!validateIP(ip) || !validateIP(mask)) return;
+
+      const ipBin = toBinary(ip);
+      const maskBin = toBinary(mask);
+      const netAddr = bitwiseAnd(ip, mask);
+      const netBin = toBinary(netAddr);
+      const invertedMask = invertMask(mask);
+      const broadcast = bitwiseOr(netAddr, invertedMask);
+      const broadBin = toBinary(broadcast);
+
+      displayBits('ipBits', ipBin, cidr);
+      displayBits('maskBits', maskBin, cidr);
+      displayBits('netBits', netBin, cidr);
+      displayBits('broadBits', broadBin, cidr);
+
+      const totalHosts = 2 ** (32 - cidr);
+      const usableHosts = Math.max(totalHosts - 2, 0);
+      const firstHost = cidr === 32 ? ip : netAddr.split('.').slice(0, 3).concat([parseInt(netAddr.split('.')[3]) + 1]).join('.');
+      const lastHost = cidr >= 31 ? ip : broadcast.split('.').slice(0, 3).concat([parseInt(broadcast.split('.')[3]) - 1]).join('.');
+
+      document.getElementById('info').innerHTML = `
+        <div>Network Address: <span class="text-yellow-400">${netAddr}</span></div>
+        <div>Broadcast Address: <span class="text-red-400">${broadcast}</span></div>
+        <div>Total Hosts: <span class="text-green-400">${totalHosts}</span></div>
+        <div>Usable Hosts: <span class="text-green-400">${usableHosts}</span></div>
+        <div>First Host: <span class="text-blue-400">${firstHost}</span></div>
+        <div>Last Host: <span class="text-blue-400">${lastHost}</span></div>
+      `;
+    }
+
+    window.onload = () => {
+      updateFromIP();
+      updateFromMask();
+    };
+  </script>
+</body>
+</html>
